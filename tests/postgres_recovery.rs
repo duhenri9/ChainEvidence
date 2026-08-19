@@ -69,7 +69,8 @@ fn injected_pre_commit_crash_preserves_previous_checkpoint() {
     persist_fixture(&mut client, &old, PersistMode::Commit).unwrap();
     let before = recover(&mut client, chain_id).unwrap();
 
-    let aborted = persist_fixture(&mut client, &replacement, PersistMode::AbortBeforeCommit).unwrap();
+    let aborted =
+        persist_fixture(&mut client, &replacement, PersistMode::AbortBeforeCommit).unwrap();
     assert_eq!(aborted.outcome, "ABORTED_BEFORE_COMMIT");
     drop(client);
 
