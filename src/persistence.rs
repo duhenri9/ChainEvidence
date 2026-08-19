@@ -373,6 +373,7 @@ pub fn persist_fixture(
         &source.report_sha256,
         PERSISTENCE_CLAIM_BOUNDARY,
     );
+    let evidence_sha256 = hash_json(&unsigned);
     Ok(PersistenceEvidence {
         schema: "chain-evidence.persistence.v0.2".to_owned(),
         outcome: outcome.to_owned(),
@@ -384,7 +385,7 @@ pub fn persist_fixture(
         canonical_event_count: source.canonical_events.len(),
         state_sha256: source.state_sha256,
         source_report_sha256: source.report_sha256,
-        evidence_sha256: hash_json(&unsigned),
+        evidence_sha256,
         claim_boundary: PERSISTENCE_CLAIM_BOUNDARY.to_owned(),
     })
 }
@@ -540,6 +541,7 @@ pub fn recover(client: &mut Client, chain_id: u64) -> Result<RecoveryEvidence, P
         &source_report_sha256,
         PERSISTENCE_CLAIM_BOUNDARY,
     );
+    let recovery_sha256 = hash_json(&unsigned);
     Ok(RecoveryEvidence {
         schema: "chain-evidence.recovery.v0.2".to_owned(),
         outcome: "RECOVERED".to_owned(),
@@ -552,7 +554,7 @@ pub fn recover(client: &mut Client, chain_id: u64) -> Result<RecoveryEvidence, P
         material_state,
         state_sha256: observed_state_sha256,
         source_report_sha256,
-        recovery_sha256: hash_json(&unsigned),
+        recovery_sha256,
         claim_boundary: PERSISTENCE_CLAIM_BOUNDARY.to_owned(),
     })
 }
