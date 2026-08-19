@@ -1,0 +1,79 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Toolchain identity
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --all-targets --all-features
+
+      - name: Prove known-bad divergence control
+        run: cargo test known_bad_naive_indexer_diverges
+
+      - name: Generate canonical reorg evidence
+        run: |
+          mkdir -p artifacts
+          cargo run --quiet -- fixtures/reorg.json artifacts/reorg-report.json
+          cargo run --quiet -- fixtures/reorg.json artifacts/replay-report.json
+
+      - name: Generate missing-ancestor evidence
+        run: |
+          set +e
+          cargo run --quiet -- fixtures/missing-ancestor.json artifacts/missing-ancestor-report.json
+          status=$?
+          set -e
+          test "$status" -eq 3
+
+      - name: Verify evidence semantics
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          reorg = json.loads(Path("artifacts/reorg-report.json").read_text())
+          replay = json.loads(Path("artifacts/replay-report.json").read_text())
+          missing = json.loads(Path("artifacts/missing-ancestor-report.json").read_text())
+
+          assert reorg["outcome"] == "PASS"
+          assert reorg["canonical_block_hashes"] == ["0xg", "0xb1", "0xb2"]
+          assert "orphan-only" not in reorg["material_state"]
+          assert any(item["kind"] == "REORG" for item in reorg["applications"])
+          assert reorg["state_sha256"] == replay["state_sha256"]
+          assert reorg["report_sha256"] == replay["report_sha256"]
+
+          assert missing["outcome"] == "INDETERMINATE"
+          assert missing["error_code"] == "MISSING_ANCESTOR"
+          assert missing["canonical_block_hashes"] == ["0xg"]
+          PY
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chain-evidence-v0
+          path: artifacts/*.json
+          if-no-files-found: error
