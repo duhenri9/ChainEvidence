@@ -180,7 +180,9 @@ pub fn persist_fixture(
             "SOURCE_INDETERMINATE",
             format!(
                 "fixture cannot be persisted as canonical evidence: {}",
-                source.error.unwrap_or_else(|| "unknown source error".to_owned())
+                source
+                    .error
+                    .unwrap_or_else(|| "unknown source error".to_owned())
             ),
         ));
     }
@@ -513,11 +515,8 @@ pub fn recover(client: &mut Client, chain_id: u64) -> Result<RecoveryEvidence, P
         });
     }
 
-    let observed_state_sha256 = state_sha256(
-        &canonical_block_hashes,
-        &canonical_events,
-        &material_state,
-    );
+    let observed_state_sha256 =
+        state_sha256(&canonical_block_hashes, &canonical_events, &material_state);
     if observed_state_sha256 != expected_state_sha256 {
         return Err(PersistenceError::new(
             "STATE_DIGEST_MISMATCH",
