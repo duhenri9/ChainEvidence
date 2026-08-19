@@ -10,16 +10,30 @@ pub const CLAIM_BOUNDARY: &str = "V0 proves only deterministic canonical-chain r
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineError {
-    ChainIdMismatch { expected: u64, observed: u64 },
-    MissingGenesis { observed_number: u64 },
-    MissingAncestor { hash: String },
+    ChainIdMismatch {
+        expected: u64,
+        observed: u64,
+    },
+    MissingGenesis {
+        observed_number: u64,
+    },
+    MissingAncestor {
+        hash: String,
+    },
     InvalidBlockNumber {
         parent_number: u64,
         block_number: u64,
     },
-    DuplicateLogIndex { block_hash: String, log_index: u32 },
-    ConflictingBlockIdentity { hash: String },
-    AncestryCycle { hash: String },
+    DuplicateLogIndex {
+        block_hash: String,
+        log_index: u32,
+    },
+    ConflictingBlockIdentity {
+        hash: String,
+    },
+    AncestryCycle {
+        hash: String,
+    },
 }
 
 impl EngineError {
@@ -40,10 +54,16 @@ impl fmt::Display for EngineError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ChainIdMismatch { expected, observed } => {
-                write!(formatter, "expected chain id {expected}, observed {observed}")
+                write!(
+                    formatter,
+                    "expected chain id {expected}, observed {observed}"
+                )
             }
             Self::MissingGenesis { observed_number } => {
-                write!(formatter, "first observed block must be number 0, got {observed_number}")
+                write!(
+                    formatter,
+                    "first observed block must be number 0, got {observed_number}"
+                )
             }
             Self::MissingAncestor { hash } => {
                 write!(formatter, "required ancestor is unavailable: {hash}")
@@ -63,7 +83,10 @@ impl fmt::Display for EngineError {
                 "block {block_hash} contains duplicate log index {log_index}"
             ),
             Self::ConflictingBlockIdentity { hash } => {
-                write!(formatter, "block hash {hash} was observed with conflicting content")
+                write!(
+                    formatter,
+                    "block hash {hash} was observed with conflicting content"
+                )
             }
             Self::AncestryCycle { hash } => {
                 write!(formatter, "ancestry cycle detected while resolving {hash}")
@@ -129,20 +152,15 @@ impl CanonicalEngine {
             self.blocks.insert(hash.clone(), block);
             self.canonical.push(hash.clone());
             self.rebuild_material_state();
-            return Ok(self.application_evidence(
-                ApplyKind::Appended,
-                hash,
-                None,
-                Vec::new(),
-            ));
+            return Ok(self.application_evidence(ApplyKind::Appended, hash, None, Vec::new()));
         }
 
-        let parent = self
-            .blocks
-            .get(&block.parent_hash)
-            .ok_or_else(|| EngineError::MissingAncestor {
-                hash: block.parent_hash.clone(),
-            })?;
+        let parent =
+            self.blocks
+                .get(&block.parent_hash)
+                .ok_or_else(|| EngineError::MissingAncestor {
+                    hash: block.parent_hash.clone(),
+                })?;
         if parent.number + 1 != block.number {
             return Err(EngineError::InvalidBlockNumber {
                 parent_number: parent.number,
@@ -162,17 +180,11 @@ impl CanonicalEngine {
         if &parent_hash == tip_hash {
             self.canonical.push(hash.clone());
             self.rebuild_material_state();
-            return Ok(self.application_evidence(
-                ApplyKind::Appended,
-                hash,
-                None,
-                Vec::new(),
-            ));
+            return Ok(self.application_evidence(ApplyKind::Appended, hash, None, Vec::new()));
         }
 
         let (common_index, common_hash, mut branch) = self.resolve_branch(&hash)?;
-        let canonical_height = self.canonical_height();
-        if block_number < canonical_height {
+        if block_number < self.canonical_height() {
             return Ok(self.application_evidence(
                 ApplyKind::StoredFork,
                 hash,
@@ -184,12 +196,7 @@ impl CanonicalEngine {
         let orphaned = self.canonical.split_off(common_index + 1);
         self.canonical.append(&mut branch);
         self.rebuild_material_state();
-        Ok(self.application_evidence(
-            ApplyKind::Reorg,
-            hash,
-            Some(common_hash),
-            orphaned,
-        ))
+        Ok(self.application_evidence(ApplyKind::Reorg, hash, Some(common_hash), orphaned))
     }
 
     fn validate_block(&self, block: &Block) -> Result<(), EngineError> {
@@ -231,12 +238,12 @@ impl CanonicalEngine {
                 return Err(EngineError::AncestryCycle { hash: cursor });
             }
 
-            let ancestor = self
-                .blocks
-                .get(&cursor)
-                .ok_or_else(|| EngineError::MissingAncestor {
-                    hash: cursor.clone(),
-                })?;
+            let ancestor =
+                self.blocks
+                    .get(&cursor)
+                    .ok_or_else(|| EngineError::MissingAncestor {
+                        hash: cursor.clone(),
+                    })?;
             branch_reversed.push(cursor.clone());
             cursor = ancestor.parent_hash.clone();
         }
@@ -335,8 +342,8 @@ pub fn report_fixture(fixture: &Fixture) -> EvidenceReport {
     let mut error_code = None;
     let mut error = None;
 
-    for block in fixture.blocks.clone() {
-        match engine.apply(block) {
+    for block in &fixture.blocks {
+        match engine.apply(block.clone()) {
             Ok(application) => applications.push(application),
             Err(engine_error) => {
                 error_code = Some(engine_error.code().to_owned());
@@ -346,7 +353,11 @@ pub fn report_fixture(fixture: &Fixture) -> EvidenceReport {
         }
     }
 
-    let outcome = if error.is_some() { "INDETERMINATE" } else { "PASS" };
+    let outcome = if error.is_some() {
+        "INDETERMINATE"
+    } else {
+        "PASS"
+    };
     let mut report = EvidenceReport {
         schema: "chain-evidence.report.v0".to_owned(),
         outcome: outcome.to_owned(),
@@ -398,8 +409,18 @@ mod tests {
             blocks: vec![
                 block(0, "0xg", "0xroot", vec![event(0, "owner", "alice")]),
                 block(1, "0xa1", "0xg", vec![event(0, "route", "legacy")]),
-                block(2, "0xa2", "0xa1", vec![event(0, "orphan-only", "present")]),
-                block(1, "0xb1", "0xg", vec![event(0, "route", "replacement")]),
+                block(
+                    2,
+                    "0xa2",
+                    "0xa1",
+                    vec![event(0, "orphan-only", "present")],
+                ),
+                block(
+                    1,
+                    "0xb1",
+                    "0xg",
+                    vec![event(0, "route", "replacement")],
+                ),
                 block(2, "0xb2", "0xb1", vec![event(0, "settled", "yes")]),
             ],
         }
@@ -417,7 +438,10 @@ mod tests {
         let report = report_fixture(&fixture);
         assert_eq!(report.outcome, "PASS");
         assert_eq!(report.canonical_block_hashes, vec!["0xg", "0xa1"]);
-        assert_eq!(report.material_state.get("status"), Some(&"issued".to_owned()));
+        assert_eq!(
+            report.material_state.get("status"),
+            Some(&"issued".to_owned())
+        );
     }
 
     #[test]
@@ -428,16 +452,28 @@ mod tests {
         engine.apply(block(2, "0xa2", "0xa1", vec![])).unwrap();
         let evidence = engine.apply(block(1, "0xb1", "0xg", vec![])).unwrap();
         assert_eq!(evidence.kind, ApplyKind::StoredFork);
-        assert_eq!(engine.canonical_block_hashes(), vec!["0xg", "0xa1", "0xa2"]);
+        assert_eq!(
+            engine.canonical_block_hashes(),
+            vec!["0xg", "0xa1", "0xa2"]
+        );
     }
 
     #[test]
     fn performs_multi_block_reorg_and_removes_orphaned_state() {
         let report = report_fixture(&reorg_fixture());
         assert_eq!(report.outcome, "PASS");
-        assert_eq!(report.canonical_block_hashes, vec!["0xg", "0xb1", "0xb2"]);
-        assert_eq!(report.material_state.get("route"), Some(&"replacement".to_owned()));
-        assert_eq!(report.material_state.get("settled"), Some(&"yes".to_owned()));
+        assert_eq!(
+            report.canonical_block_hashes,
+            vec!["0xg", "0xb1", "0xb2"]
+        );
+        assert_eq!(
+            report.material_state.get("route"),
+            Some(&"replacement".to_owned())
+        );
+        assert_eq!(
+            report.material_state.get("settled"),
+            Some(&"yes".to_owned())
+        );
         assert!(!report.material_state.contains_key("orphan-only"));
         let reorg = report
             .applications
@@ -460,7 +496,10 @@ mod tests {
         };
         let report = report_fixture(&fixture);
         assert_eq!(report.canonical_block_hashes, vec!["0xg", "0xb1"]);
-        assert_eq!(report.material_state.get("status"), Some(&"new".to_owned()));
+        assert_eq!(
+            report.material_state.get("status"),
+            Some(&"new".to_owned())
+        );
     }
 
     #[test]
@@ -506,7 +545,10 @@ mod tests {
             naive.apply(&block);
         }
         assert!(!canonical.material_state.contains_key("orphan-only"));
-        assert_eq!(naive.material_state().get("orphan-only"), Some(&"present".to_owned()));
+        assert_eq!(
+            naive.material_state().get("orphan-only"),
+            Some(&"present".to_owned())
+        );
         assert_ne!(canonical.material_state, naive.material_state());
     }
 }
