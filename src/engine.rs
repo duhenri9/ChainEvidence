@@ -409,18 +409,8 @@ mod tests {
             blocks: vec![
                 block(0, "0xg", "0xroot", vec![event(0, "owner", "alice")]),
                 block(1, "0xa1", "0xg", vec![event(0, "route", "legacy")]),
-                block(
-                    2,
-                    "0xa2",
-                    "0xa1",
-                    vec![event(0, "orphan-only", "present")],
-                ),
-                block(
-                    1,
-                    "0xb1",
-                    "0xg",
-                    vec![event(0, "route", "replacement")],
-                ),
+                block(2, "0xa2", "0xa1", vec![event(0, "orphan-only", "present")]),
+                block(1, "0xb1", "0xg", vec![event(0, "route", "replacement")]),
                 block(2, "0xb2", "0xb1", vec![event(0, "settled", "yes")]),
             ],
         }
@@ -452,20 +442,14 @@ mod tests {
         engine.apply(block(2, "0xa2", "0xa1", vec![])).unwrap();
         let evidence = engine.apply(block(1, "0xb1", "0xg", vec![])).unwrap();
         assert_eq!(evidence.kind, ApplyKind::StoredFork);
-        assert_eq!(
-            engine.canonical_block_hashes(),
-            vec!["0xg", "0xa1", "0xa2"]
-        );
+        assert_eq!(engine.canonical_block_hashes(), vec!["0xg", "0xa1", "0xa2"]);
     }
 
     #[test]
     fn performs_multi_block_reorg_and_removes_orphaned_state() {
         let report = report_fixture(&reorg_fixture());
         assert_eq!(report.outcome, "PASS");
-        assert_eq!(
-            report.canonical_block_hashes,
-            vec!["0xg", "0xb1", "0xb2"]
-        );
+        assert_eq!(report.canonical_block_hashes, vec!["0xg", "0xb1", "0xb2"]);
         assert_eq!(
             report.material_state.get("route"),
             Some(&"replacement".to_owned())
@@ -496,10 +480,7 @@ mod tests {
         };
         let report = report_fixture(&fixture);
         assert_eq!(report.canonical_block_hashes, vec!["0xg", "0xb1"]);
-        assert_eq!(
-            report.material_state.get("status"),
-            Some(&"new".to_owned())
-        );
+        assert_eq!(report.material_state.get("status"), Some(&"new".to_owned()));
     }
 
     #[test]
