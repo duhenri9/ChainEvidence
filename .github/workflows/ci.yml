@@ -11,7 +11,24 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: chain
+          POSTGRES_PASSWORD: chain
+          POSTGRES_DB: chain_evidence
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chain -d chain_evidence"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://chain:chain@localhost:5432/chain_evidence
+      CHAIN_EVIDENCE_REQUIRE_POSTGRES: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -22,6 +39,7 @@ jobs:
         run: |
           rustc --version
           cargo --version
+          psql --version
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -29,25 +47,33 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Test
-        run: cargo test --all-targets --all-features
+      - name: Test core and PostgreSQL recovery controls
+        run: cargo test --all-targets --all-features -- --test-threads=1
 
-      - name: Prove known-bad divergence control
+      - name: Prove known-bad in-memory divergence control
         run: cargo test known_bad_naive_indexer_diverges
+
+      - name: Prove known-bad non-transactional checkpoint control
+        run: cargo test --test postgres_recovery known_bad_nontransactional_checkpoint_update_is_detected -- --exact --test-threads=1
 
       - name: Generate canonical reorg evidence
         run: |
           mkdir -p artifacts
-          cargo run --quiet -- fixtures/reorg.json artifacts/reorg-report.json
-          cargo run --quiet -- fixtures/reorg.json artifacts/replay-report.json
+          cargo run --quiet --bin chain-evidence -- fixtures/reorg.json artifacts/reorg-report.json
+          cargo run --quiet --bin chain-evidence -- fixtures/reorg.json artifacts/replay-report.json
 
       - name: Generate missing-ancestor evidence
         run: |
           set +e
-          cargo run --quiet -- fixtures/missing-ancestor.json artifacts/missing-ancestor-report.json
+          cargo run --quiet --bin chain-evidence -- fixtures/missing-ancestor.json artifacts/missing-ancestor-report.json
           status=$?
           set -e
           test "$status" -eq 3
+
+      - name: Generate PostgreSQL restart evidence
+        run: |
+          cargo run --quiet --bin persistence_evidence -- \
+            fixtures/reorg.json artifacts/postgres-recovery-report.json
 
       - name: Verify evidence semantics
         run: |
@@ -58,6 +84,7 @@ jobs:
           reorg = json.loads(Path("artifacts/reorg-report.json").read_text())
           replay = json.loads(Path("artifacts/replay-report.json").read_text())
           missing = json.loads(Path("artifacts/missing-ancestor-report.json").read_text())
+          persisted = json.loads(Path("artifacts/postgres-recovery-report.json").read_text())
 
           assert reorg["outcome"] == "PASS"
           assert reorg["canonical_block_hashes"] == ["0xg", "0xb1", "0xb2"]
@@ -69,11 +96,20 @@ jobs:
           assert missing["outcome"] == "INDETERMINATE"
           assert missing["error_code"] == "MISSING_ANCESTOR"
           assert missing["canonical_block_hashes"] == ["0xg"]
+
+          assert persisted["persistence"]["outcome"] == "COMMITTED"
+          assert persisted["recovery"]["outcome"] == "RECOVERED"
+          assert persisted["persistence"]["schema_version"] == "0001_persistence"
+          assert persisted["recovery"]["schema_version"] == "0001_persistence"
+          assert persisted["recovery"]["canonical_block_hashes"] == ["0xg", "0xb1", "0xb2"]
+          assert "orphan-only" not in persisted["recovery"]["material_state"]
+          assert persisted["persistence"]["state_sha256"] == persisted["recovery"]["state_sha256"]
+          assert len(persisted["pack_sha256"]) == 64
           PY
 
       - name: Upload evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: chain-evidence-v0
+          name: chain-evidence-v0-2
           path: artifacts/*.json
           if-no-files-found: error
