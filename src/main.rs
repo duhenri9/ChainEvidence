@@ -16,8 +16,14 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut args = env::args_os().skip(1);
-    let input = PathBuf::from(args.next().ok_or("usage: chain-evidence <fixture.json> <report.json>")?);
-    let output = PathBuf::from(args.next().ok_or("usage: chain-evidence <fixture.json> <report.json>")?);
+    let input = PathBuf::from(
+        args.next()
+            .ok_or("usage: chain-evidence <fixture.json> <report.json>")?,
+    );
+    let output = PathBuf::from(
+        args.next()
+            .ok_or("usage: chain-evidence <fixture.json> <report.json>")?,
+    );
     if args.next().is_some() {
         return Err("usage: chain-evidence <fixture.json> <report.json>".into());
     }
