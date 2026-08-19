@@ -32,6 +32,7 @@ pub struct Fixture {
 pub enum ApplyKind {
     Appended,
     Reorg,
+    StoredFork,
     Idempotent,
 }
 
@@ -69,6 +70,7 @@ pub struct EvidenceReport {
     pub canonical_events: Vec<CanonicalEventEvidence>,
     pub material_state: BTreeMap<String, String>,
     pub state_sha256: String,
+    pub error_code: Option<String>,
     pub error: Option<String>,
     pub claim_boundary: String,
     pub report_sha256: String,
