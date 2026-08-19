@@ -1,0 +1,85 @@
+{
+  "chain_id": 31337,
+  "blocks": [
+    {
+      "chain_id": 31337,
+      "number": 0,
+      "hash": "0xg",
+      "parent_hash": "0xroot",
+      "events": [
+        {
+          "tx_hash": "0xtx-owner",
+          "log_index": 0,
+          "contract_address": "0xasset",
+          "decoder_id": "asset-v1",
+          "key": "owner",
+          "value": "alice"
+        }
+      ]
+    },
+    {
+      "chain_id": 31337,
+      "number": 1,
+      "hash": "0xa1",
+      "parent_hash": "0xg",
+      "events": [
+        {
+          "tx_hash": "0xtx-a1",
+          "log_index": 0,
+          "contract_address": "0xasset",
+          "decoder_id": "asset-v1",
+          "key": "route",
+          "value": "legacy"
+        }
+      ]
+    },
+    {
+      "chain_id": 31337,
+      "number": 2,
+      "hash": "0xa2",
+      "parent_hash": "0xa1",
+      "events": [
+        {
+          "tx_hash": "0xtx-a2",
+          "log_index": 0,
+          "contract_address": "0xasset",
+          "decoder_id": "asset-v1",
+          "key": "orphan-only",
+          "value": "present"
+        }
+      ]
+    },
+    {
+      "chain_id": 31337,
+      "number": 1,
+      "hash": "0xb1",
+      "parent_hash": "0xg",
+      "events": [
+        {
+          "tx_hash": "0xtx-b1",
+          "log_index": 0,
+          "contract_address": "0xasset",
+          "decoder_id": "asset-v1",
+          "key": "route",
+          "value": "replacement"
+        }
+      ]
+    },
+    {
+      "chain_id": 31337,
+      "number": 2,
+      "hash": "0xb2",
+      "parent_hash": "0xb1",
+      "events": [
+        {
+          "tx_hash": "0xtx-b2",
+          "log_index": 0,
+          "contract_address": "0xasset",
+          "decoder_id": "asset-v1",
+          "key": "settled",
+          "value": "yes"
+        }
+      ]
+    }
+  ]
+}
