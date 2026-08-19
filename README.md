@@ -6,67 +6,122 @@ ChainEvidence is an open-source distributed-systems project for reconstructing c
 
 > Indexed data is useful. Indexed data with canonical-chain provenance is defensible.
 
-## V0 status
+## Current engineering baseline
 
-The first executable gate is fixture-backed and deterministic. It proves a bounded canonical/reorg mechanism before adding PostgreSQL, RPC clients, Solidity contracts or analytics.
+ChainEvidence now has two executable evidence layers:
 
 ```text
+V0 — canonical semantics
 ordered block observations
           ↓
-chain + identity validation
+identity + ancestry
           ↓
-known block graph
-          ↓
-parent continuity / common ancestor
-          ↓
-canonical branch policy
-          ↓
-reorg + orphan invalidation
+reorg / orphan invalidation
           ↓
 material-state replay
           ↓
-canonical event lineage + SHA-256 evidence
+canonical lineage + SHA-256
+
+V0.2 — transactional persistence
+canonical evidence
+          ↓
+PostgreSQL transaction
+          ↓
+blocks + events + canonical flags
+          ↓
+checkpoint + state/report digests
+          ↓
+commit / injected rollback
+          ↓
+new connection + deterministic recovery
 ```
 
-### What V0 proves
+The project deliberately proves these mechanisms before adding live RPC, Solidity integration, backfill/live-tail or analytics.
+
+## V0 — canonical-chain engine
+
+The fixture-backed Rust engine proves, within its documented deterministic observation policy:
 
 - straight canonical append;
-- shorter competing branches are stored without silently replacing the tip;
+- shorter competing branches stored without silently replacing the tip;
 - one-block and multi-block reorganisation;
 - common-ancestor discovery from locally known ancestry;
-- orphaned block effects are removed from material state;
+- orphaned block effects removed from material state;
 - deterministic replay from the same observation sequence;
-- duplicate observation is idempotent;
-- conflicting block identity and ambiguous duplicate log indexes are rejected;
+- duplicate observation idempotency;
+- conflicting block identity and ambiguous duplicate log indexes rejected;
 - missing ancestry fails closed as `INDETERMINATE`;
-- every canonical event preserves chain id, block hash/number, transaction hash, log index, contract address and decoder identity;
-- a deliberately naive append-only indexer diverges after reorg and is required to fail the control expectation.
+- canonical event lineage preserves chain id, block hash/number, transaction hash, log index, contract address and decoder identity;
+- a deliberately naive append-only indexer retains orphaned state and must diverge on the reorg negative control.
 
-### What V0 does not prove
+The V0 branch-selection rule is test equipment for deterministic reorg mechanics. It is **not** presented as Ethereum consensus/fork-choice or universal finality behaviour.
 
-- Ethereum consensus or fork-choice correctness;
+## V0.2 — PostgreSQL persistence and restart recovery
+
+V0.2 adds a real PostgreSQL 16 gate around the canonical engine.
+
+It proves, against the checked-in migration and synthetic fixtures:
+
+- versioned block/event/checkpoint persistence;
+- persisted block/event identity conflict detection rather than blind upsert acceptance;
+- canonical flags and checkpoint advancement in one transaction;
+- a pre-commit injected rollback preserves the previous durable checkpoint/state;
+- a durable commit survives client teardown/reconnect;
+- duplicate ingestion after restart remains idempotent;
+- a persisted multi-block reorg keeps old fork rows as evidence but marks them non-canonical;
+- orphaned material state is absent after recovery;
+- recovery validates genesis, contiguous heights and parent-hash continuity;
+- checkpoint tip/height must match reconstructed canonical state;
+- recovered canonical events reproduce the same V0 state SHA-256;
+- stale/corrupt checkpoint identity fails closed;
+- a deliberately bad non-transactional checkpoint update is detected rather than accepted.
+
+See [`docs/POSTGRES_RECOVERY.md`](docs/POSTGRES_RECOVERY.md) for the transaction invariant, crash controls and recovery algorithm.
+
+## What is not claimed
+
+The current evidence does **not** establish:
+
+- Ethereum consensus or live-chain fork-choice correctness;
 - universal finality or settlement guarantees;
 - RPC-provider honesty/completeness;
-- persistence or crash-safe database recovery;
+- production-grade PostgreSQL durability configuration;
+- replication, failover, point-in-time recovery or disaster recovery;
+- hostile multi-writer concurrency safety;
 - audited smart contracts;
 - production readiness, multi-chain support or throughput;
 - zk verification, graph analytics, ML or fraud detection.
 
-## Run the evidence fixture
+Each of those properties requires a separate executable gate.
+
+## Run the canonical evidence fixture
 
 Requires the Rust toolchain pinned in `rust-toolchain.toml`.
 
 ```bash
-cargo run -- fixtures/reorg.json artifacts/reorg-report.json
+cargo run --bin chain-evidence -- fixtures/reorg.json artifacts/reorg-report.json
 ```
 
 A safe missing-ancestor control returns exit code `3` and writes an `INDETERMINATE` report:
 
 ```bash
-cargo run -- fixtures/missing-ancestor.json artifacts/missing-ancestor-report.json
+cargo run --bin chain-evidence -- fixtures/missing-ancestor.json artifacts/missing-ancestor-report.json
 ```
 
-The JSON report includes canonical block identities, event lineage, material state, reorg/orphan evidence, a state SHA-256, an overall report SHA-256 and the exact claim boundary.
+The JSON report includes canonical block identities, event lineage, material state, reorg/orphan evidence, state SHA-256, report SHA-256 and the exact claim boundary.
+
+## Run PostgreSQL recovery evidence
+
+Set `DATABASE_URL` to a PostgreSQL instance, then:
+
+```bash
+cargo run --bin persistence_evidence -- \
+  fixtures/reorg.json artifacts/postgres-recovery-report.json
+```
+
+The tool clears only the fixture chain id, persists the canonical evidence, closes the first client, reconnects, reconstructs the durable state and emits a persistence/recovery evidence pack.
+
+CI runs the same layer against a fresh `postgres:16-alpine` service. Local PostgreSQL configuration outside this bounded fixture path is not certified by the project.
 
 ## Engineering gate
 
@@ -76,17 +131,32 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 ```
 
-CI additionally executes the reorg and missing-ancestor fixtures, proves deterministic replay, runs the known-bad indexer control and uploads machine-readable evidence artifacts.
+The CI gate additionally:
+
+- boots a real PostgreSQL 16 service;
+- runs all core and persistence/recovery tests serially;
+- proves the in-memory known-bad indexer divergence;
+- proves the non-transactional checkpoint negative control;
+- executes reorg and missing-ancestor artifacts;
+- generates a restart/recovery evidence pack;
+- verifies machine-readable semantics;
+- uploads evidence artifacts.
 
 ## Design notes
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — canonicality, observation policy, reorg/replay semantics.
 - [`docs/CLAIMS_AND_THREATS.md`](docs/CLAIMS_AND_THREATS.md) — bounded claims and threat assumptions.
-- [Issue #1](../../issues/1) — staged roadmap from V0 to persistence, local EVM, live tail and analytics.
+- [`docs/POSTGRES_RECOVERY.md`](docs/POSTGRES_RECOVERY.md) — transactional persistence, crash and restart invariants.
+- [Issue #1](../../issues/1) — staged roadmap toward local EVM, backfill/live-tail and analytics.
 
 ## Clean-room boundary
 
 This repository is independently authored from public specifications and synthetic/local fixtures. It does not reuse private WM3 ChainLab implementation, business logic, curriculum or data.
+
+## Contributing and security
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- [`SECURITY.md`](SECURITY.md)
 
 ## Licence
 
