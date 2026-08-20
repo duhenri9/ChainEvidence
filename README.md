@@ -8,7 +8,7 @@ ChainEvidence is an open-source distributed-systems project for reconstructing c
 
 ## Current engineering baseline
 
-ChainEvidence now has two executable evidence layers:
+ChainEvidence now has three executable evidence layers:
 
 ```text
 V0 — canonical semantics
@@ -34,9 +34,20 @@ checkpoint + state/report digests
 commit / injected rollback
           ↓
 new connection + deterministic recovery
+
+V0.3 — bounded local EVM adapter
+local Anvil JSON-RPC snapshot
+          ↓
+ReferenceLifecycle logs + receipts
+          ↓
+strict decoder / identity checks
+          ↓
+existing Block / Event core model
+          ↓
+canonical material state + evidence
 ```
 
-The project deliberately proves these mechanisms before adding live RPC, Solidity integration, backfill/live-tail or analytics.
+The project deliberately proves these mechanisms before adding public-RPC ingestion, backfill/live-tail operation, analytics or production claims.
 
 ## V0 — canonical-chain engine
 
@@ -78,13 +89,34 @@ It proves, against the checked-in migration and synthetic fixtures:
 
 See [`docs/POSTGRES_RECOVERY.md`](docs/POSTGRES_RECOVERY.md) for the transaction invariant, crash controls and recovery algorithm.
 
+## V0.3 — bounded local EVM adapter
+
+V0.3 adds the first real EVM observation boundary while keeping canonicality and persistence inside the deterministic core.
+
+It proves, against a local pinned Foundry/Anvil environment and the checked reference contract:
+
+- compiler-produced Solidity ABI equivalence against the versioned checked ABI, ignoring only non-semantic top-level item ordering;
+- direct bounded JSON-RPC use of `web3_clientVersion`, `eth_chainId`, `eth_blockNumber`, `eth_getBlockByNumber`, `eth_getLogs` and `eth_getTransactionReceipt`;
+- exact preservation of chain id, block number/hash, transaction hash, log index, contract address and decoder identity;
+- deployment transaction/block/contract identity in evidence;
+- receipt/log block-identity consistency;
+- ABI, source, event-topic and bounded log-data SHA-256 evidence;
+- rejection of non-loopback RPC, wrong chain id, unknown decoder, removed/malformed logs, wrong signatures, conflicting log identities and receipt/log mismatches;
+- deployment and event transactions only from accounts already unlocked by the local Anvil process — no committed private key is required;
+- an Anvil snapshot/revert replacement control where the adapter reproduces the replacement canonical snapshot and deterministic state/report identities.
+
+The snapshot/revert control demonstrates replacement-snapshot equivalence. It does **not** claim continuous live-tail reorg detection.
+
+See [`docs/LOCAL_EVM_ADAPTER.md`](docs/LOCAL_EVM_ADAPTER.md) for the exact adapter, failure and evidence contracts.
+
 ## What is not claimed
 
 The current evidence does **not** establish:
 
-- Ethereum consensus or live-chain fork-choice correctness;
+- Ethereum consensus or public-chain fork-choice correctness;
 - universal finality or settlement guarantees;
-- RPC-provider honesty/completeness;
+- public RPC-provider honesty/completeness;
+- continuous live-tail reorg observation/recovery;
 - production-grade PostgreSQL durability configuration;
 - replication, failover, point-in-time recovery or disaster recovery;
 - hostile multi-writer concurrency safety;
@@ -123,10 +155,28 @@ The tool clears only the fixture chain id, persists the canonical evidence, clos
 
 CI runs the same layer against a fresh `postgres:16-alpine` service. Local PostgreSQL configuration outside this bounded fixture path is not certified by the project.
 
+## Local EVM evidence
+
+The complete V0.3 reproduction includes contract compilation/deployment, event emission and negative controls, so the canonical source of truth is the CI workflow plus [`docs/LOCAL_EVM_ADAPTER.md`](docs/LOCAL_EVM_ADAPTER.md).
+
+The adapter CLI itself is:
+
+```bash
+cargo run --bin evm_evidence -- \
+  --rpc-url http://127.0.0.1:8545 \
+  --expected-chain-id 31337 \
+  --contract <deployed-contract-address> \
+  --deployment-tx <deployment-transaction-hash> \
+  --out artifacts/evm-local-report.json
+```
+
+It intentionally refuses non-loopback RPC targets in V0.3.
+
 ## Engineering gate
 
 ```bash
 cargo fmt --all -- --check
+forge fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 ```
@@ -139,6 +189,8 @@ The CI gate additionally:
 - proves the non-transactional checkpoint negative control;
 - executes reorg and missing-ancestor artifacts;
 - generates a restart/recovery evidence pack;
+- compiles the reference Solidity contract and verifies ABI semantics;
+- starts local Anvil and exercises real logs/receipts with replacement-snapshot, wrong-chain, wrong-decoder and malformed-log controls;
 - verifies machine-readable semantics;
 - uploads evidence artifacts.
 
@@ -147,7 +199,8 @@ The CI gate additionally:
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — canonicality, observation policy, reorg/replay semantics.
 - [`docs/CLAIMS_AND_THREATS.md`](docs/CLAIMS_AND_THREATS.md) — bounded claims and threat assumptions.
 - [`docs/POSTGRES_RECOVERY.md`](docs/POSTGRES_RECOVERY.md) — transactional persistence, crash and restart invariants.
-- [Issue #1](../../issues/1) — staged roadmap toward local EVM, backfill/live-tail and analytics.
+- [`docs/LOCAL_EVM_ADAPTER.md`](docs/LOCAL_EVM_ADAPTER.md) — V0.3 local JSON-RPC, decoder and evidence boundary.
+- [Issue #1](../../issues/1) — staged roadmap toward backfill/live-tail and analytics.
 
 ## Clean-room boundary
 
