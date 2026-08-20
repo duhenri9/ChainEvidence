@@ -3,7 +3,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest as Sha2Digest, Sha256};
-use sha3::{Digest as Sha3Digest, Keccak256};
+use sha3::Keccak256;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -218,7 +218,7 @@ fn required_string<'a>(
     })
 }
 
-fn as_object(value: &Value, context: &str) -> Result<&Map<String, Value>, AdapterError> {
+fn as_object<'a>(value: &'a Value, context: &str) -> Result<&'a Map<String, Value>, AdapterError> {
     value.as_object().ok_or_else(|| {
         AdapterError::new(
             "MALFORMED_RPC_OBJECT",
