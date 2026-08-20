@@ -11,7 +11,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16-alpine
@@ -35,14 +35,25 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install pinned Foundry toolchain
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with:
+          version: v1.7.1
+          cache: false
+
       - name: Toolchain identity
         run: |
           rustc --version
           cargo --version
           psql --version
+          forge --version
+          cast --version
+          anvil --version
 
       - name: Format
-        run: cargo fmt --all -- --check
+        run: |
+          cargo fmt --all -- --check
+          forge fmt --check
 
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
@@ -75,6 +86,134 @@ jobs:
           cargo run --quiet --bin persistence_evidence -- \
             fixtures/reorg.json artifacts/postgres-recovery-report.json
 
+      - name: Build deterministic reference contract and verify ABI
+        run: |
+          forge build --force
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          generated = json.loads(
+              Path("evm/out/ReferenceLifecycle.sol/ReferenceLifecycle.json").read_text()
+          )["abi"]
+          declared = json.loads(Path("evm/abi/ReferenceLifecycle.v1.json").read_text())
+          assert generated == declared, "checked ABI must equal compiler output"
+          PY
+
+      - name: Start local Anvil and produce EVM adapter evidence
+        run: |
+          set -euo pipefail
+          RPC_URL=http://127.0.0.1:8545
+          anvil --port 8545 --chain-id 31337 > artifacts/anvil.log 2>&1 &
+          anvil_pid=$!
+          trap 'kill "$anvil_pid" >/dev/null 2>&1 || true' EXIT
+
+          rpc() {
+            local method="$1"
+            local params="$2"
+            curl --fail --silent --show-error \
+              -H 'content-type: application/json' \
+              --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"${method}\",\"params\":${params}}" \
+              "$RPC_URL"
+          }
+
+          ready=0
+          for attempt in $(seq 1 30); do
+            if rpc web3_clientVersion '[]' | jq -e '.result' >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+
+          account=$(rpc eth_accounts '[]' | jq -er '.result[0]')
+          bytecode=$(jq -er '.bytecode.object' evm/out/ReferenceLifecycle.sol/ReferenceLifecycle.json)
+          deploy_params=$(jq -cn --arg from "$account" --arg data "$bytecode" '[{from:$from,data:$data}]')
+          deploy_tx=$(rpc eth_sendTransaction "$deploy_params" | jq -er '.result')
+
+          contract=""
+          for attempt in $(seq 1 30); do
+            receipt=$(rpc eth_getTransactionReceipt "[\"$deploy_tx\"]")
+            contract=$(printf '%s' "$receipt" | jq -r '.result.contractAddress // empty')
+            if [ -n "$contract" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -n "$contract"
+
+          snapshot=$(rpc evm_snapshot '[]' | jq -er '.result')
+
+          send_event() {
+            local key="$1"
+            local value="$2"
+            local key32 value32 calldata params tx
+            key32=$(cast format-bytes32-string "$key")
+            value32=$(cast format-bytes32-string "$value")
+            calldata=$(cast calldata 'set(bytes32,bytes32)' "$key32" "$value32")
+            params=$(jq -cn \
+              --arg from "$account" \
+              --arg to "$contract" \
+              --arg data "$calldata" \
+              '[{from:$from,to:$to,data:$data}]')
+            tx=$(rpc eth_sendTransaction "$params" | jq -er '.result')
+            rpc eth_getTransactionReceipt "[\"$tx\"]" | jq -e '.result.status == "0x1"' >/dev/null
+          }
+
+          send_event owner alice
+          send_event route legacy
+
+          cargo run --quiet --bin evm_evidence -- \
+            --rpc-url "$RPC_URL" \
+            --expected-chain-id 31337 \
+            --contract "$contract" \
+            --deployment-tx "$deploy_tx" \
+            --out artifacts/evm-before-reorg.json
+
+          rpc evm_revert "[\"$snapshot\"]" | jq -e '.result == true' >/dev/null
+
+          send_event owner alice
+          send_event route replacement
+          send_event settled yes
+
+          cargo run --quiet --bin evm_evidence -- \
+            --rpc-url "$RPC_URL" \
+            --expected-chain-id 31337 \
+            --contract "$contract" \
+            --deployment-tx "$deploy_tx" \
+            --out artifacts/evm-local-report.json
+
+          cargo run --quiet --bin evm_evidence -- \
+            --rpc-url "$RPC_URL" \
+            --expected-chain-id 31337 \
+            --contract "$contract" \
+            --deployment-tx "$deploy_tx" \
+            --out artifacts/evm-local-replay.json
+
+          set +e
+          cargo run --quiet --bin evm_evidence -- \
+            --rpc-url "$RPC_URL" \
+            --expected-chain-id 1 \
+            --contract "$contract" \
+            --deployment-tx "$deploy_tx" \
+            --out artifacts/evm-wrong-chain.json
+          wrong_chain_status=$?
+          cargo run --quiet --bin evm_evidence -- \
+            --rpc-url "$RPC_URL" \
+            --expected-chain-id 31337 \
+            --contract "$contract" \
+            --deployment-tx "$deploy_tx" \
+            --decoder-id unknown-decoder-v2 \
+            --out artifacts/evm-wrong-decoder.json
+          wrong_decoder_status=$?
+          set -e
+          test "$wrong_chain_status" -eq 3
+          test "$wrong_decoder_status" -eq 3
+
+      - name: Prove malformed local log fails closed
+        run: cargo test malformed_missing_transaction_hash_fails_closed -- --exact
+
       - name: Verify evidence semantics
         run: |
           python - <<'PY'
@@ -85,6 +224,11 @@ jobs:
           replay = json.loads(Path("artifacts/replay-report.json").read_text())
           missing = json.loads(Path("artifacts/missing-ancestor-report.json").read_text())
           persisted = json.loads(Path("artifacts/postgres-recovery-report.json").read_text())
+          before = json.loads(Path("artifacts/evm-before-reorg.json").read_text())
+          live = json.loads(Path("artifacts/evm-local-report.json").read_text())
+          live_replay = json.loads(Path("artifacts/evm-local-replay.json").read_text())
+          wrong_chain = json.loads(Path("artifacts/evm-wrong-chain.json").read_text())
+          wrong_decoder = json.loads(Path("artifacts/evm-wrong-decoder.json").read_text())
 
           assert reorg["outcome"] == "PASS"
           assert reorg["canonical_block_hashes"] == ["0xg", "0xb1", "0xb2"]
@@ -105,11 +249,43 @@ jobs:
           assert "orphan-only" not in persisted["recovery"]["material_state"]
           assert persisted["persistence"]["state_sha256"] == persisted["recovery"]["state_sha256"]
           assert len(persisted["pack_sha256"]) == 64
+
+          assert before["outcome"] == "PASS"
+          assert before["observed_chain_id"] == 31337
+          assert before["adapted_event_count"] == 2
+          assert before["core_report"]["material_state"]["route"] == "legacy"
+
+          assert live["outcome"] == "PASS"
+          assert live["observed_chain_id"] == 31337
+          assert live["adapted_event_count"] == 3
+          assert live["core_report"]["material_state"] == {
+              "owner": "alice",
+              "route": "replacement",
+              "settled": "yes",
+          }
+          assert live["deployment"]["contract_address"] == live["contract_address"]
+          assert live["decoder_id"] == "reference-lifecycle-v1"
+          assert len(live["abi_sha256"]) == 64
+          assert len(live["source_sha256"]) == 64
+          assert len(live["log_sources"]) == 3
+          assert len(live["receipt_sources"]) == 3
+          assert len(live["report_sha256"]) == 64
+          assert live["report_sha256"] == live_replay["report_sha256"]
+          assert live["core_report"]["state_sha256"] == live_replay["core_report"]["state_sha256"]
+
+          # Anvil state snapshot/revert proves the adapter observes the replacement
+          # canonical snapshot. V0.3 does not claim live-tail reorg detection.
+          assert before["core_report"]["canonical_block_hashes"][-1] != live["core_report"]["canonical_block_hashes"][-1]
+
+          assert wrong_chain["outcome"] == "INDETERMINATE"
+          assert wrong_chain["error_code"] == "CHAIN_ID_MISMATCH"
+          assert wrong_decoder["outcome"] == "INDETERMINATE"
+          assert wrong_decoder["error_code"] == "UNKNOWN_DECODER"
           PY
 
       - name: Upload evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: chain-evidence-v0-2
+          name: chain-evidence-v0-3
           path: artifacts/*.json
           if-no-files-found: error
