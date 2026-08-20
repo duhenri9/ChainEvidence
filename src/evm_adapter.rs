@@ -206,7 +206,10 @@ fn normalize_hex(value: &str, field: &str) -> Result<String, AdapterError> {
     Ok(trimmed.to_ascii_lowercase())
 }
 
-fn required_string<'a>(object: &'a Map<String, Value>, field: &str) -> Result<&'a str, AdapterError> {
+fn required_string<'a>(
+    object: &'a Map<String, Value>,
+    field: &str,
+) -> Result<&'a str, AdapterError> {
     object.get(field).and_then(Value::as_str).ok_or_else(|| {
         AdapterError::new(
             "MALFORMED_RPC_FIELD",
@@ -315,10 +318,7 @@ fn decode_reference_log(
         "log.transactionHash",
     )?;
     let block_hash = normalize_hex(required_string(object, "blockHash")?, "log.blockHash")?;
-    let block_number = parse_hex_u64(
-        required_string(object, "blockNumber")?,
-        "log.blockNumber",
-    )?;
+    let block_number = parse_hex_u64(required_string(object, "blockNumber")?, "log.blockNumber")?;
     let log_index = parse_hex_u32(required_string(object, "logIndex")?, "log.logIndex")?;
 
     let topics = object
@@ -328,13 +328,16 @@ fn decode_reference_log(
     if topics.len() != 1 {
         return Err(AdapterError::new(
             "UNKNOWN_EVENT_SHAPE",
-            format!("reference event requires exactly one topic, observed {}", topics.len()),
+            format!(
+                "reference event requires exactly one topic, observed {}",
+                topics.len()
+            ),
         ));
     }
     let topic0 = normalize_hex(
-        topics[0]
-            .as_str()
-            .ok_or_else(|| AdapterError::new("MALFORMED_RPC_FIELD", "log topic0 is not a string"))?,
+        topics[0].as_str().ok_or_else(|| {
+            AdapterError::new("MALFORMED_RPC_FIELD", "log topic0 is not a string")
+        })?,
         "log.topic0",
     )?;
     if topic0 != expected_topic0 {
@@ -349,7 +352,10 @@ fn decode_reference_log(
     if payload.len() != 128 {
         return Err(AdapterError::new(
             "MALFORMED_EVENT_DATA",
-            format!("reference event requires 64 data bytes, observed {}", payload.len() / 2),
+            format!(
+                "reference event requires 64 data bytes, observed {}",
+                payload.len() / 2
+            ),
         ));
     }
     let key = bytes32_text(&payload[..64], "event.key")?;
@@ -394,10 +400,7 @@ fn receipt_evidence(
             format!("requested {tx_hash}, observed {observed_tx}"),
         ));
     }
-    let block_hash = normalize_hex(
-        required_string(object, "blockHash")?,
-        "receipt.blockHash",
-    )?;
+    let block_hash = normalize_hex(required_string(object, "blockHash")?, "receipt.blockHash")?;
     let block_number = parse_hex_u64(
         required_string(object, "blockNumber")?,
         "receipt.blockNumber",
@@ -477,7 +480,10 @@ fn fetch_block(
     })
 }
 
-fn collect_inner(config: &EvmAdapterConfig, partial: &mut PartialEvidence) -> Result<(), AdapterError> {
+fn collect_inner(
+    config: &EvmAdapterConfig,
+    partial: &mut PartialEvidence,
+) -> Result<(), AdapterError> {
     if config.decoder_id != REFERENCE_DECODER_ID {
         return Err(AdapterError::new(
             "UNKNOWN_DECODER",
@@ -518,9 +524,9 @@ fn collect_inner(config: &EvmAdapterConfig, partial: &mut PartialEvidence) -> Re
 
     let chain_value = rpc.call("eth_chainId", json!([]))?;
     let chain_id = parse_hex_u64(
-        chain_value
-            .as_str()
-            .ok_or_else(|| AdapterError::new("MALFORMED_RPC_FIELD", "eth_chainId is not a string"))?,
+        chain_value.as_str().ok_or_else(|| {
+            AdapterError::new("MALFORMED_RPC_FIELD", "eth_chainId is not a string")
+        })?,
         "eth_chainId",
     )?;
     partial.observed_chain_id = Some(chain_id);
@@ -534,7 +540,11 @@ fn collect_inner(config: &EvmAdapterConfig, partial: &mut PartialEvidence) -> Re
         ));
     }
 
-    partial.deployment = Some(deployment_evidence(&rpc, &deployment_tx, &contract_address)?);
+    partial.deployment = Some(deployment_evidence(
+        &rpc,
+        &deployment_tx,
+        &contract_address,
+    )?);
 
     let topic0 = reference_event_topic0();
     let logs_value = rpc.call(
@@ -585,17 +595,24 @@ fn collect_inner(config: &EvmAdapterConfig, partial: &mut PartialEvidence) -> Re
         });
         if receipt_hashes.insert(decoded.event.tx_hash.clone()) {
             let receipt = receipt_evidence(&rpc, &decoded.event.tx_hash, None)?;
-            if receipt.block_number != decoded.block_number || receipt.block_hash != decoded.block_hash {
+            if receipt.block_number != decoded.block_number
+                || receipt.block_hash != decoded.block_hash
+            {
                 return Err(AdapterError::new(
                     "RECEIPT_LOG_MISMATCH",
-                    format!("receipt identity does not match log {}", decoded.event.tx_hash),
+                    format!(
+                        "receipt identity does not match log {}",
+                        decoded.event.tx_hash
+                    ),
                 ));
             }
             partial.receipt_sources.push(receipt);
         }
     }
 
-    partial.log_sources.sort_by_key(|item| (item.block_number, item.log_index));
+    partial
+        .log_sources
+        .sort_by_key(|item| (item.block_number, item.log_index));
     partial
         .receipt_sources
         .sort_by_key(|item| (item.block_number, item.transaction_hash.clone()));
@@ -603,9 +620,9 @@ fn collect_inner(config: &EvmAdapterConfig, partial: &mut PartialEvidence) -> Re
 
     let latest_value = rpc.call("eth_blockNumber", json!([]))?;
     let latest = parse_hex_u64(
-        latest_value
-            .as_str()
-            .ok_or_else(|| AdapterError::new("MALFORMED_RPC_FIELD", "eth_blockNumber is not a string"))?,
+        latest_value.as_str().ok_or_else(|| {
+            AdapterError::new("MALFORMED_RPC_FIELD", "eth_blockNumber is not a string")
+        })?,
         "eth_blockNumber",
     )?;
 
@@ -644,7 +661,8 @@ fn collect_inner(config: &EvmAdapterConfig, partial: &mut PartialEvidence) -> Re
 fn limitations() -> Vec<String> {
     vec![
         "local loopback HTTP JSON-RPC only".to_owned(),
-        "one current canonical snapshot; live-tail/reorg observation remains a later gate".to_owned(),
+        "one current canonical snapshot; live-tail/reorg observation remains a later gate"
+            .to_owned(),
         "only the checked reference-lifecycle-v1 bytes32 event decoder is trusted".to_owned(),
         "bytes32 key/value payloads must decode to non-empty UTF-8".to_owned(),
         "no network consensus or universal finality claim".to_owned(),
@@ -772,9 +790,8 @@ mod tests {
     #[test]
     fn unknown_topic_fails_closed() {
         let mut value = valid_log();
-        value["topics"] = json!([
-            "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-        ]);
+        value["topics"] =
+            json!(["0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"]);
         let error = decode_reference_log(
             &value,
             "0x1111111111111111111111111111111111111111",
