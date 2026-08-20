@@ -1,4 +1,6 @@
-use chain_evidence::{collect_evm_evidence, write_evm_report, EvmAdapterConfig, REFERENCE_DECODER_ID};
+use chain_evidence::{
+    collect_evm_evidence, write_evm_report, EvmAdapterConfig, REFERENCE_DECODER_ID,
+};
 use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
