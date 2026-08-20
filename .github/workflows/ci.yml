@@ -97,7 +97,20 @@ jobs:
               Path("evm/out/ReferenceLifecycle.sol/ReferenceLifecycle.json").read_text()
           )["abi"]
           declared = json.loads(Path("evm/abi/ReferenceLifecycle.v1.json").read_text())
-          assert generated == declared, "checked ABI must equal compiler output"
+
+          def canonical_items(items):
+              return sorted(
+                  items,
+                  key=lambda item: json.dumps(
+                      item,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  ),
+              )
+
+          assert canonical_items(generated) == canonical_items(declared), (
+              "checked ABI must equal compiler output modulo top-level item ordering"
+          )
           PY
 
       - name: Start local Anvil and produce EVM adapter evidence
