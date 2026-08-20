@@ -5,7 +5,7 @@ edition = "2021"
 description = "Reorg-aware EVM canonical-chain evidence engine"
 license = "Apache-2.0"
 repository = "https://github.com/duhenri9/ChainEvidence"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [dependencies]
 postgres = "0.19"
