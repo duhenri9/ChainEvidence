@@ -1,10 +1,10 @@
 # ChainEvidence — Repository Hygiene Baseline 2026-08
 
-**Status:** active hygiene baseline / first safe correction executed  
+**Status:** audit baseline / narrow truth-sync executed / no destructive runtime cleanup yet  
 **Base SHA:** `73b75d9b5f7615025393347669a5d7f1d6ffdd3b`  
 **Current audit branch:** `audit/repository-hygiene-pre-v0-4`  
 **Owner:** issue #6  
-**Next product gate:** V0.4 bounded backfill + live tail
+**Next product gate:** issue #8 — V0.4 bounded backfill + live tail
 
 ## 1. Goal
 
@@ -20,73 +20,53 @@ Action remains separate: `KEEP / DELETE / ARCHIVE / REPLACE / INVESTIGATE`.
 
 ## 3. Evidence-backed findings
 
-| Path / subsystem | Class | Evidence | Action | V0.4 impact | Executed? |
-|---|---|---|---|---|---|
-| `src/naive.rs` / `NaiveIndexer` | CURRENT REFERENCE CONTROL | Architecture, README, engine/tests and CI deliberately use the naive indexer to retain orphaned effects and prove canonical reorg divergence. | `KEEP` | Protect as an adversarial/negative baseline. It is not dead code. | yes — keep decision recorded |
-| `docs/ARCHITECTURE.md` prior “Next architecture gates” | `LEGACY` documentation | The document still described PostgreSQL persistence and local EVM integration as future gates even though V0.2 and V0.3 are delivered on main. | `REWRITE` | Prevent Memory Reality before V0.4 and make the extension boundary explicit. | **yes** — rewritten on this branch |
-| V0 canonical engine | CURRENT | README/current architecture identify it as the deterministic canonical/reorg core consumed by later persistence/EVM layers. | `KEEP` | V0.4 must feed observations into this boundary rather than duplicate fork/reorg semantics. | yes — protected boundary |
-| V0.2 PostgreSQL persistence + migration | CURRENT | Main history/README expose transactional restart/reorg recovery as a delivered evidence gate. | `KEEP` | Backfill/live-tail checkpoints should reuse persistence semantics rather than add a parallel cursor store unless evidence requires one. | yes — protected boundary |
-| V0.3 local EVM adapter | CURRENT / boundary to protect | Current README/history pin a bounded local Anvil/Foundry adapter and explicit ABI. | `KEEP` | V0.4 should extend provider ingestion without leaking local-EVM assumptions into the canonical chain engine. | yes — protected boundary |
-| `src/bin/**` multiple evidence CLIs | `INVESTIGATE` | Distinct V0/V0.2/V0.3 evidence commands may be deliberate reproducibility surfaces. No deletion proof yet. | `INVESTIGATE` | V0.4 should add one bounded command or subcommand only after checking existing CLI overlap. | no |
-| fixtures across delivered gates | `INVESTIGATE` | Historical and negative-control fixtures may support deterministic evidence and CI. | `INVESTIGATE` | Do not deduplicate by filename/shape alone; map test/CI consumers first. | no |
-| dependencies/features in `Cargo.toml` | `INVESTIGATE` | V0.2 and V0.3 added PostgreSQL/RPC dependencies. Current reachability needs cargo/module audit before pruning. | `INVESTIGATE` | Prune only after current binaries/tests and V0.4 adapter shape are known. | no |
+| Path / subsystem | Class | Evidence | Action | V0.4 impact |
+|---|---|---|---|---|
+| `src/naive.rs` / `NaiveIndexer` | CURRENT REFERENCE CONTROL | Architecture, README, engine/tests and CI deliberately use the naive indexer to retain orphaned effects and prove canonical reorg divergence. | `KEEP` | Protect as an adversarial/negative baseline. It is not dead code. |
+| `docs/ARCHITECTURE.md` “Next architecture gates” | `LEGACY` documentation — FIXED ON AUDIT BRANCH | The document previously described PostgreSQL persistence and local EVM integration as future work although V0.2/V0.3 were delivered. | `REWRITE` — executed | The branch now marks V0.2/V0.3 delivered and V0.4 as next, preserving historical V0 boundaries. |
+| V0 canonical engine | CURRENT | README/current architecture identify it as the deterministic canonical/reorg core consumed by later persistence/EVM layers. | `KEEP` | V0.4 must feed observations into this boundary rather than duplicate fork/reorg semantics. |
+| V0.2 PostgreSQL persistence + migration | CURRENT | Main history/README expose transactional restart/reorg recovery as a delivered evidence gate. | `KEEP` | Backfill/live-tail checkpoints should reuse persistence semantics rather than add a parallel cursor store unless evidence requires one. |
+| V0.3 local EVM adapter | CURRENT / boundary to protect | Current README/history pin a bounded local Anvil/Foundry adapter and explicit ABI. | `KEEP` | V0.4 should extend provider ingestion without leaking local-EVM assumptions into the canonical chain engine. |
+| `src/bin/persistence_evidence.rs` | CURRENT REPRODUCIBILITY SURFACE | CLI requires `DATABASE_URL`, persists a fixture, reconnects, recovers canonical state and emits the versioned `chain-evidence.persistence-pack.v0.2` digest. It is an executable V0.2 evidence boundary, not an abandoned binary. | `KEEP` | V0.4 may extend the evidence pack or add one bounded V0.4 command, but must not silently replace V0.2 reproducibility. |
+| `src/bin/evm_evidence.rs` | CURRENT REPRODUCIBILITY SURFACE | CLI executes the bounded local-EVM adapter with explicit loopback RPC / chain / contract / deployment identity and writes the V0.3 evidence report. | `KEEP` | Reuse adapter primitives; do not turn this command into an unbounded daemon or bury V0.3 proof inside V0.4. |
+| `src/bin/**` count | CURRENT / intentionally small | Current source tree has only two evidence binaries: V0.2 persistence and V0.3 EVM. No CLI proliferation is currently proven. | `KEEP` | V0.4 should prefer one bounded evidence command/binary only if the new gate cannot be expressed safely with existing entry points. |
+| `Cargo.toml` runtime dependencies | CURRENT / no deletion proof | Current package remains small: `postgres`, `reqwest`, `serde`, `serde_json`, `sha2`, `sha3`. Each dependency family corresponds to delivered persistence, JSON-RPC/HTTP, serialization/evidence hashing or EVM topic/hash semantics. | `KEEP / RECHECK AFTER V0.4` | Do not prune before the live-tail adapter shape is known. No dependency bloat is currently proven. |
+| fixtures across delivered gates | `INVESTIGATE` | Historical and negative-control fixtures may support deterministic evidence and CI. | `INVESTIGATE` | Do not deduplicate by filename/shape alone; map test/CI consumers first. |
+| CI evidence jobs | CURRENT / INVESTIGATE FOR DUPLICATION ONLY | V0.2/V0.3 depend on separate Postgres and local-EVM evidence gates. Their existence is expected from the delivered architecture. | `KEEP`, inspect command duplication only | V0.4 must preserve old gates and add one bounded new gate rather than collapsing proof history. |
 
-## 4. First executed correction
+## 4. V0.4 boundary from current architecture
 
-The architecture document has now been truth-synchronised on this audit branch.
-
-It explicitly records:
-
-```text
-V0 canonical/reorg core — delivered
-V0.2 PostgreSQL persistence/recovery — delivered
-V0.3 bounded local EVM adapter — delivered
-V0.4 bounded backfill + live tail — next
-```
-
-The corrected V0.4 extension boundary is:
+The safe extension point is:
 
 ```text
-bounded EVM RPC provider
+bounded RPC provider
 → backfill/live-tail observation adapter
 → canonical Block/Event observations
 → existing canonical/reorg engine
-→ existing persistence/evidence path
+→ existing PostgreSQL persistence/evidence path
 ```
-
-This removes a proven documentation contradiction without deleting runtime evidence or changing executable semantics.
-
-## 5. V0.4 invariants carried forward
 
 V0.4 must not introduce:
 
 - a second canonical chain implementation;
 - a second event identity format;
-- hidden fork-choice/finality semantics;
-- a cursor/checkpoint path that bypasses current persistence evidence without a documented reason;
-- public-RPC correctness or universal-finality claims from a bounded provider experiment.
+- an independent cursor database without evidence that current persistence cannot own resume safely;
+- an implicit/unrecorded finality policy;
+- a new provider framework purely for abstraction symmetry.
 
-It must prove:
+Execution contract is tracked in issue #8.
 
-- bounded range backfill;
-- resumable checkpoint behavior;
-- backfill/live overlap idempotency;
-- provider failure/reconnect behavior;
-- explicit live reorg observation/recovery;
-- exact incomplete/failure states when continuity cannot be established.
+## 5. Remaining inventory before any destructive cleanup
 
-## 6. Remaining inventory before destructive cleanup
-
-- enumerate `src/bin/**` and map each to README/docs/CI;
 - map fixture consumers across unit/integration/CI;
-- compare migrations with current persistence structs/queries;
-- inspect local EVM adapter for provider-neutral vs Anvil-only code;
-- inspect Cargo dependencies/features for current consumers;
-- review remaining docs for V0.2/V0.3 truth sync;
-- inspect CI for duplicated setup/evidence commands;
-- check generated evidence/artifact directories against `.gitignore`.
+- inspect migrations against current persistence structs/queries for superseded schema paths;
+- inspect local EVM adapter for provider-neutral reusable boundary vs intentionally Anvil-only test equipment;
+- inspect CI for duplicated setup commands that can be consolidated without reducing independent proof;
+- check generated evidence/artifact directories against `.gitignore` and repository-tracked evidence policy.
 
-## 7. No-delete boundary
+The remaining inventory is deliberately narrow. No broad refactor is justified before V0.4.
+
+## 6. No-delete boundary
 
 No source file, fixture, migration or dependency is authorised for deletion from this baseline alone.
 
@@ -94,19 +74,21 @@ Any destructive follow-up must provide:
 
 - direct/reference search;
 - runtime/CLI/test/CI/config evidence;
-- exact replacement if behavior remains required;
+- exact replacement if behaviour remains required;
 - full affected validation suite on exact SHA.
 
-## 8. Current decision
+## 7. Current decision
 
-The repository currently looks more like a **mature layered prototype with documentation drift** than a codebase with obvious dead-code accumulation.
+The repository currently looks like a **mature layered prototype with limited documentation drift**, not a codebase suffering from obvious dead-code accumulation.
 
-First proven cleanup result:
+The first proven cleanup target was documentation truth and that correction is executed on the audit branch. The two evidence CLIs are intentionally distinct and current. The dependency set is already small enough that premature pruning would create more risk than value.
 
-`LEGACY DOCUMENTATION → REWRITE → EXECUTED`
+Recommended sequence:
 
-First protected false-positive cleanup candidate:
+```text
+finish narrow fixture/CI/migration inventory
+→ close hygiene gate with no manufactured deletion
+→ start issue #8 V0.4
+```
 
-`NaiveIndexer → KEEP → NEGATIVE CONTROL`
-
-Proceed with the remaining inventory and then V0.4. Do not spend the active engineering window trying to manufacture deletion candidates when the stronger next value is bounded live/backfill ingestion evidence.
+The objective remains: **less accidental system, more intentional evidence infrastructure**.
