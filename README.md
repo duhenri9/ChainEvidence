@@ -6,6 +6,21 @@ ChainEvidence is an open-source distributed-systems project for reconstructing c
 
 > Indexed data is useful. Indexed data with canonical-chain provenance is defensible.
 
+
+## 60–90 second review
+
+**What this demonstrates:** a Rust distributed-systems/indexing core that survives synthetic chain reorganisations, invalidates orphaned effects, persists canonical state transactionally and emits lineage evidence that explains why an indexed result is considered canonical.
+
+**Fastest local proof:** the deterministic reorg fixture requires only the pinned Rust toolchain.
+
+~~~bash
+cargo run --bin chain-evidence -- fixtures/reorg.json artifacts/reorg-report.json
+~~~
+
+**Engineering path:** run the canonical fixture, then inspect [ARCHITECTURE](docs/ARCHITECTURE.md), [PostgreSQL recovery](docs/POSTGRES_RECOVERY.md), the [local EVM adapter](docs/LOCAL_EVM_ADAPTER.md) and CI negative controls.
+
+**Evidence boundary:** the local engine, transactional recovery and bounded Anvil adapter are separate evidence layers. They do not claim Ethereum consensus correctness, public-RPC completeness, continuous live-tail reorg handling or production readiness.
+
 ## Current engineering baseline
 
 ChainEvidence now has three executable evidence layers:
